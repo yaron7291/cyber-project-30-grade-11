@@ -1,28 +1,33 @@
 __author__ = 'yaron'
 
 from operator import truediv
-
+import sys
 from tcp_by_size import send_with_size, recv_by_size
 import threading, socket, pygame
-
+room_id = "67"
 sockudp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_address_tcp = ('127.0.0.1', 1233)
 server_address_udp = ('127.0.0.1', 1234)
 sock.connect(server_address_tcp)
 try:
-
+    msg_join = f"JOIN|{room_id}"
+    send_with_size(sock, msg_join)
+    join_response = recv_by_size(sock).decode()
+    print("join response", join_response)
     data = recv_by_size(sock)
     client_id = int(data.decode())
     print("Client ID:", client_id)
     sock.setblocking(False)
     print("Connected to server!")
-    msg = f"hello|{client_id}"
+    msg = f"hello|{client_id}|{room_id}"
     sockudp.sendto(msg.encode(), server_address_udp)
     print("UDP Send message:", msg)
     sockudp.setblocking(False)
 except:
     print("Connection failed")
+    sys.exit()
+
 game_started = False
 pygame.init()
 screen_width = 1400
@@ -230,11 +235,9 @@ def listen_to_server():
                     if int(got_hit_id) == int(client_id):
                         player.hp = float(newhp)
                         print(f"client new hp: {player.hp}")
-                        player.draw_hprect()
                     if int(got_hit_id) == int(enemy_id):
                         enemy.hp = float(newhp)
                         print(f"enemy new hp: {enemy.hp}")
-                        enemy.draw_hprect()
 
 
         except BlockingIOError:
@@ -275,7 +278,7 @@ while running:
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            msg_Exit = f"EXIT|{client_id}"
+            msg_Exit = f"EXIT|{client_id}|{room_id}"
             send_with_size(sock, msg_Exit)
             running = False
     if not game_started:
@@ -288,14 +291,14 @@ while running:
         continue  # מדלג על שאר הלולאה (תנועה, ירי וכו')
     all_sprites.update()
     if player.moved or turret.angle_changed:
-        msg = f"move|{client_id}|{player.rect.x}|{player.rect.y}|{turret.angle}"
+        msg = f"move|{client_id}|{room_id}|{player.rect.x}|{player.rect.y}|{turret.angle}"
         sockudp.sendto(msg.encode(), server_address_udp)
         player.moved = False
         turret.angle_changed = False
 
 
     if player.shots > player_shots:
-        msg_shot = f"shot|{client_id}|{player.shots}"
+        msg_shot = f"shot|{client_id}|{room_id}|{player.shots}"
         send_with_size(sock, msg_shot)
         player_shots = player.shots
     player.moved = False
