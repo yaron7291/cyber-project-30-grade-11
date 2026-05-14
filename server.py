@@ -11,6 +11,20 @@ fps = 60
 client_shot = 1
 clients_info = {}
 all_clients = []
+class GameRoom:
+    def __init__(self, roomd_id):
+        self.roomd_id = roomd_id
+        self.players = []
+        self.upd_players = {}
+        self.clients_info = {}
+        self.game_started = False
+
+    def add_player(self, player):
+        if len(self.players) < 2:
+            self.players.append(player)
+            return True
+        return False
+
 class PlayerData:
     def __init__(self, color, x, y):
         self.x = x
