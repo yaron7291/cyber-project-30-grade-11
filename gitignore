@@ -1,0 +1,21 @@
+# Python bytecode 
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyCharm/IDE
+.idea/
+.vscode/
+*.swp
+
+# Virtual Environment 
+venv/
+.venv/
+env/
+
+# OS generated
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
