@@ -85,21 +85,27 @@ def shot_logic(client_id, client_shot, room_id):
             udp_sock.sendto(to_send.encode(), target_addr)
         t_temp = t_temp + clock
         time.sleep(clock)
+        ## בדיקה אם הכדור בתוך הטווח שבו הטנק של היריב
         if otherx - 25 < x_temp < otherx + 25 and othery - 25 < y_temp < othery + 25:
             print("Hited")
             print(f"before hp : {float(room.clients_info[other_id]['hp'])}")
             room.clients_info[other_id]['hp'] -= 10
             gotshotmsg = f"hit|{other_id}|{float(room.clients_info[other_id]['hp'])}"
-            for target_id, target_addr in room.udp_players.items():
-                udp_sock.sendto(gotshotmsg.encode(), target_addr)
+            for Player_tcp_socket in room.players:
+                try:
+                    send_with_size(Player_tcp_socket, gotshotmsg.encode())
+                except:
+                    pass
+
             print(f"after hit msg: {gotshotmsg}")
             t_temp = t_total + 1
             if room.clients_info[other_id]['hp'] == 0:
                 msglose = f"LOSE|{other_id}"
-                room.clients_info
-
-
-
+                for Player_tcp_socket in room.players:
+                    try:
+                        send_with_size(Player_tcp_socket, msglose.encode())
+                    except:
+                        pass
 
         for target_id, target_addr in room.udp_players.items():
             udp_sock.sendto(to_send.encode(), target_addr)
@@ -157,34 +163,72 @@ def handle_udp_communication():
         except Exception as e:
             print(f"UDP Error: {e}")
             continue
+
+import random
+import string
+
+def generate_room_id():
+    return ''.join(random.choices(string.digits, k=4))
+
+
 def handle_client(sock, tid, addr):
     room_id = None
     while room_id is None:
-        data = recv_by_size(sock)
-        msg = data.decode()
-        parts = msg.split("|")
-        if parts[0] == "JOIN":
-            target_room = parts[1]
-            if target_room not in all_rooms:
-                all_rooms[target_room] = GameRoom(target_room)
-            if  all_rooms[target_room].add_player(sock) :
-                room_id = target_room
-                send_with_size(sock, f"JOIN_SUCCESS|{target_room}")
-                current_room = all_rooms[room_id]
-                my_id_in_room = str(len(current_room.players))
-                current_room.clients_info[my_id_in_room] = {'x': 0, 'y': 0, 'angle': 0, 'hp': 100.0}
-                send_with_size(sock, my_id_in_room.encode())
-                print(f'New Client number {tid} from {addr}')
-                if len(current_room.players) == 2:
-                    print("two connected")
-                    for sock in current_room.players:
-                        try:
-                            send_with_size(sock, "START".encode())
-                        except:
-                            pass
-            else:
-                send_with_size(sock, f"ROOM_FULL_OR_NOT_FOUND|{target_room}")
+        try:
+            data = recv_by_size(sock)
+            msg = data.decode()
+            parts = msg.split("|")
 
+            target_room_obj = None
+
+            if parts[0] == "CREATE_PRIVATE":
+                new_id = generate_room_id()
+                all_rooms[new_id] = GameRoom(new_id)
+                target_room_obj = all_rooms[new_id]
+                print(f"Created private room: {new_id}")
+
+            elif parts[0] == "MATCHMAKE":
+                found = False
+                for r_id, r_obj in all_rooms.items():
+                    if len(r_obj.players) == 1:
+                        target_room_obj = r_obj
+                        found = True
+                        break
+
+                if not found:
+                    new_id = generate_room_id()
+                    all_rooms[new_id] = GameRoom(new_id)
+                    target_room_obj = all_rooms[new_id]
+
+            elif parts[0] == "JOIN_PRIVATE":
+                code = parts[1]
+                if code in all_rooms:
+                    target_room_obj = all_rooms[code]
+                else:
+                    send_with_size(sock, "ERROR|Room not found".encode())
+                    continue
+
+            if target_room_obj:
+                if target_room_obj.add_player(sock):
+                    room_id = target_room_obj.roomd_id
+
+                    send_with_size(sock, f"JOIN_SUCCESS|{room_id}".encode())
+
+                    current_room = all_rooms[room_id]
+                    my_id_in_room = str(len(current_room.players))
+                    current_room.clients_info[my_id_in_room] = {'x': 0, 'y': 0, 'angle': 0, 'hp': 100.0}
+
+                    send_with_size(sock, my_id_in_room.encode())
+
+                    if len(current_room.players) == 2:
+                        for s in current_room.players:
+                            send_with_size(s, "START".encode())
+                else:
+                    send_with_size(sock, "ERROR|Room full".encode())
+
+        except Exception as e:
+            print(f"Error in menu phase: {e}")
+            break
     global all_to_die
     finish = False
     print(f'New Client number {tid} from {addr}')
@@ -201,14 +245,16 @@ def handle_client(sock, tid, addr):
             parts = request_str.split("|")
             request_code = parts[0]
             print(request_code)
-            if request_code == b'EXIT':
+            if request_code == 'EXIT':
 
                 finish = True
                 tmpid = parts[1]
                 exitmsg = f"EXIT"
                 room_id = parts[2]
-                room = all_rooms[room_id]
-                room.players.remove(sock)
+                if room_id != "None" and room_id in all_rooms:
+                    room = all_rooms[room_id]
+                    if sock in room.players:
+                        room.players.remove(sock)
                 for sockt in room.players:
                     try:
                         send_with_size(sockt, exitmsg.encode())

@@ -4,31 +4,20 @@ from operator import truediv
 import sys
 from tcp_by_size import send_with_size, recv_by_size
 import threading, socket, pygame
-room_id = "67"
 sockudp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_address_tcp = ('127.0.0.1', 1233)
 server_address_udp = ('127.0.0.1', 1234)
 sock.connect(server_address_tcp)
-try:
-    msg_join = f"JOIN|{room_id}"
-    send_with_size(sock, msg_join)
-    join_response = recv_by_size(sock).decode()
-    print("join response", join_response)
-    data = recv_by_size(sock)
-    client_id = int(data.decode())
-    print("Client ID:", client_id)
-    sock.setblocking(False)
-    print("Connected to server!")
-    msg = f"hello|{client_id}|{room_id}"
-    sockudp.sendto(msg.encode(), server_address_udp)
-    print("UDP Send message:", msg)
-    sockudp.setblocking(False)
-except:
-    print("Connection failed")
-    sys.exit()
 
-game_started = False
+client_id = None
+enemy_id = None
+room_id = None
+player = None
+enemy = None
+turret = None
+enemy_turret = None
+
 pygame.init()
 screen_width = 1400
 screen_height = 800
@@ -37,6 +26,25 @@ clock = pygame.time.Clock()
 fps = 60
 tanksize = 50
 
+
+def draw_button(screen, text, x, y, w, h, color, hover_color):
+    mouse = pygame.mouse.get_pos()
+    click = pygame.mouse.get_pressed()
+
+    # בדיקה אם העכבר על הכפתור
+    rect = pygame.Rect(x, y, w, h)
+    if rect.collidepoint(mouse):
+        pygame.draw.rect(screen, hover_color, rect)
+        if click[0] == 1:  # לחיצה שמאלית
+            return True
+    else:
+        pygame.draw.rect(screen, color, rect)
+
+    # ציור הטקסט במרכז הכפתור
+    font = pygame.font.SysFont("Arial", 30)
+    text_surf = font.render(text, True, "white")
+    screen.blit(text_surf, (x + (w / 2 - text_surf.get_width() / 2), y + (h / 2 - text_surf.get_height() / 2)))
+    return False
 
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, bullet_id):
@@ -214,7 +222,7 @@ def update_data(data):
 
 
 def listen_to_server():
-    global running, game_started
+    global running, room_id, client_id, player, turret, enemy, enemy_id, enemy_turret, all_sprites, current_state ,player_shots, enemy_shots, bullets, bullet_temp
     while running:
         try:
             tcpdata = recv_by_size(sock)
@@ -223,10 +231,42 @@ def listen_to_server():
                 tcparts = msg.split("|")
                 print("tcp revc",msg)
                 if msg == "EXIT":
-                    game_started = False
+                    current_state = STATE_MENU
+                if tcparts[0] == "JOIN_SUCCESS":
+
+                    room_id = tcparts[1]
+                    id_data= recv_by_size(sock)
+                    if id_data:
+                        client_id = int(id_data.decode())
+                        player = Tank(client_id)
+                        turret = Turret(player, client_id)
+                        all_sprites = pygame.sprite.Group()
+                        all_sprites.add(player)
+                        all_sprites.add(turret)
+
+                        if client_id == 1:
+                            enemy_id = 2
+                        else:
+                            enemy_id = 1
+                        bullet_temp = Bullet(client_id)
+                        bullets = {}
+                        enemy = Tank(enemy_id)
+                        enemy.tank_color = "red"
+                        enemy.draw_tank()
+
+                        enemy_turret = Turret(enemy, enemy_id)
+                        enemy_turret.turret_color = "black"
+                        all_sprites.add(enemy_turret)
+                        all_sprites.add(enemy)
+                        all_sprites.add(bullet_temp)
+                        player_shots = 0
+                        enemy_shots = 0
+                        print(f"room update to : {room_id} client id to :{client_id}")
+                        msg_udp = f"hello|{client_id}|{room_id}"
+                        sockudp.sendto(msg_udp.encode(), server_address_udp)
 
                 if msg == "START":
-                    game_started = True
+                    current_state = STATE_GAME
                     print("game started")
                     continue
                 if tcparts[0] == "hit":
@@ -246,79 +286,97 @@ def listen_to_server():
         except Exception as e:
             print(f"Error receiving: {e}")
 
-
-player = Tank(client_id)
-turret = Turret(player, client_id)
-all_sprites = pygame.sprite.Group()
-all_sprites.add(player)
-all_sprites.add(turret)
-
-if client_id == 1:
-    enemy_id = 2
-else:
-    enemy_id = 1
-bullet_temp = Bullet(client_id)
-bullets = {}
-enemy = Tank(enemy_id)
-enemy.tank_color = "red"
-enemy.draw_tank()
-
-enemy_turret = Turret(enemy, enemy_id)
-enemy_turret.turret_color = "black"
-all_sprites.add(enemy_turret)
-all_sprites.add(enemy)
-all_sprites.add(bullet_temp)
-
 player_shots = 0
 enemy_shots = 0
 running = True
 threading.Thread(target=listen_to_server, daemon=True).start()
-
+STATE_MENU = "MENU"
+STATE_LOBBY = "LOBBY"
+STATE_GAME = "GAME"
+current_state = STATE_MENU
+room_code_input = ""
+typing_mode = False
 while running:
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            msg_Exit = f"EXIT|{client_id}|{room_id}"
-            send_with_size(sock, msg_Exit)
+            if room_id is not None:
+                msg_Exit = f"EXIT|{client_id}|{room_id}"
+                send_with_size(sock, msg_Exit.encode())
             running = False
-    if not game_started:
+        if typing_mode and event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RETURN:
+                send_with_size(sock, f"JOIN_PRIVATE|{room_code_input}")
+                typing_mode = False
+                current_state = STATE_LOBBY
+            elif event.key == pygame.K_BACKSPACE:
+                room_code_input = room_code_input[:-1]
+            else:
+                if len(room_code_input) < 4:
+                    room_code_input += event.unicode
+
+    if current_state == STATE_MENU:
         screen.fill("black")
-        font = pygame.font.SysFont("Arial", 50)
-        text = font.render("Waiting for second player...", True, "white")
-        screen.blit(text, (screen_width // 2 - 250, screen_height // 2))
-        pygame.display.flip()
-        clock.tick(fps)
-        continue  # מדלג על שאר הלולאה (תנועה, ירי וכו')
-    all_sprites.update()
-    if player.moved or turret.angle_changed:
-        msg = f"move|{client_id}|{room_id}|{player.rect.x}|{player.rect.y}|{turret.angle}"
-        sockudp.sendto(msg.encode(), server_address_udp)
+        if draw_button(screen, "Random Match", 550, 200, 300, 50, "blue", "cyan"):
+            send_with_size(sock, "MATCHMAKE")
+            current_state = STATE_LOBBY
+
+        if draw_button(screen, "Create Private Lobby", 550, 300, 300, 50, "green", "lime"):
+            send_with_size(sock, "CREATE_PRIVATE")
+            current_state = STATE_LOBBY
+
+        if draw_button(screen, "Join Private", 550, 400, 300, 50, "red", "orange"):
+            typing_mode = True
+            pass
+
+        if typing_mode:
+            font = pygame.font.SysFont("monospace", 20)
+            img = font.render(f"Enter code: {room_code_input}", True, (255, 255, 255))
+            screen.blit(img, (550, 470))
+
+
+    elif current_state == STATE_LOBBY:
+            screen.fill("black")
+            font = pygame.font.SysFont("Arial", 50)
+            text = font.render("Waiting for second player...", True, "white")
+            screen.blit(text, (screen_width // 2 - 250, screen_height // 2))
+            if room_id:
+                font_small = pygame.font.SysFont("Arial", 40)
+                code_text = font_small.render(f"Enter code: {room_id}", True, (255, 255, 255))
+                screen.blit(code_text, (screen_width // 2 - code_text.get_width()// 2, screen_height // 2+ 150))
+
+
+    elif current_state == STATE_GAME:
+        all_sprites.update()
+        if player.moved or turret.angle_changed:
+            msg = f"move|{client_id}|{room_id}|{player.rect.x}|{player.rect.y}|{turret.angle}"
+            sockudp.sendto(msg.encode(), server_address_udp)
+            player.moved = False
+            turret.angle_changed = False
+
+
+        if player.shots > player_shots:
+            msg_shot = f"shot|{client_id}|{room_id}|{player.shots}"
+            send_with_size(sock, msg_shot)
+            player_shots = player.shots
         player.moved = False
         turret.angle_changed = False
-
-
-    if player.shots > player_shots:
-        msg_shot = f"shot|{client_id}|{room_id}|{player.shots}"
-        send_with_size(sock, msg_shot)
-        player_shots = player.shots
-    player.moved = False
-    turret.angle_changed = False
-    try:
-        while True:
-            data, addr = sockudp.recvfrom(1024)
-            if data:
-                data_str = data.decode("utf-8")
-                update_data(data_str)
-                print("udpp" + data_str)
-    except BlockingIOError:
-
-        pass
-    except Exception as e:
-        print(f"Error receiving: {e}")
-    screen.fill("blue")
-    all_sprites.draw(screen)
-    enemy.draw_hprect(screen)
-    player.draw_hprect(screen)
+        sockudp.setblocking(False)
+        try:
+            while True:
+                data, addr = sockudp.recvfrom(1024)
+                if data:
+                    data_str = data.decode("utf-8")
+                    update_data(data_str)
+                    print("udpp" + data_str)
+        except (BlockingIOError, socket.error):
+            pass
+        except Exception as e:
+            print(f"Error receiving: {e}")
+        screen.fill("blue")
+        all_sprites.draw(screen)
+        enemy.draw_hprect(screen)
+        player.draw_hprect(screen)
     pygame.display.flip()
     clock.tick(fps)
 pygame.quit()
