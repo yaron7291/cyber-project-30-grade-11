@@ -72,14 +72,18 @@ class Turret(pygame.sprite.Sprite):
         super().__init__()
         self.client_id = client_id
         self.parent = parent_tank
-        self.width = int(tanksize / 4)
-        self.height = int(tanksize * 1.5)
-        self.original_image = pygame.Surface((self.width, self.height * 2), pygame.SRCALPHA)
+        self.width = 80
+        self.height = 10
+        self.original_image = pygame.Surface((self.width * 2, self.width * 2), pygame.SRCALPHA)
         if self.client_id == 1:
             color = "red"
         else:
             color = "black"
-        pygame.draw.rect(self.original_image, color, (0, 0, self.width, self.height))
+        if self.client_id == 1:
+            pygame.draw.rect(self.original_image, color,(self.width, self.width - self.height // 2, self.width, self.height))
+        else:
+            pygame.draw.rect(self.original_image, color, (0, self.width - self.height // 2, self.width, self.height))
+
         self.image = self.original_image
         self.rect = self.image.get_rect()
         self.angle = 0
@@ -94,38 +98,46 @@ class Turret(pygame.sprite.Sprite):
                     self.angle -= 1
                 if keys[pygame.K_DOWN]:
                     self.angle += 1
-                if self.angle < 0:
+                if self.angle < -90:
+                    self.angle = -90
+                if self.angle > 0:
                     self.angle = 0
-                if self.angle > 90:
-                    self.angle = 90
             else:
                 if keys[pygame.K_UP]:
                     self.angle += 1
                 if keys[pygame.K_DOWN]:
                     self.angle -= 1
-                if self.angle > 0:
-                    self.angle = 0
-                if self.angle < -90:
-                    self.angle = -90
+                self.angle = max(0, min(90, self.angle))
+
             if old_angle != self.angle:
-                self.angle_changed = True  # --- מעדכנים שצריך לשלוח לשרת ---
-            self.image = pygame.transform.rotate(self.original_image, self.angle)
-            self.rect = self.image.get_rect(center=self.parent.rect.center)
-        else: pass
+                self.angle_changed = True
+
+        self.image = pygame.transform.rotate(self.original_image, self.angle)
+        if self.client_id == 1:
+            pivot_x = self.parent.rect.right -22
+        else:
+            pivot_x = self.parent.rect.x + 20
+        pivot_y = self.parent.rect.y + 15
+        self.rect = self.image.get_rect(center=(pivot_x, pivot_y))
+
 
 class Tank(pygame.sprite.Sprite):
     def __init__(self, client_id):
         super().__init__()
+        original_img = pygame.image.load("images/tank.png").convert_alpha()
+        self.base_image = pygame.transform.scale(original_img, (100, 37))
         self.client_id = client_id
-        self.tank_color = "green"
-        self.image = pygame.Surface((tanksize, tanksize), pygame.SRCALPHA)
-        self.draw_tank()
+        if self.client_id == 1:
+            self.image = pygame.transform.flip(self.base_image, True, False)
+        else:
+            self.image = self.base_image
+
         self.rect = self.image.get_rect()
         if self.client_id == 1:
             self.rect.right = 0
         else:
             self.rect.right = screen_width
-        self.rect.centery = screen_height - tanksize + 10
+        self.rect.bottom = screen_height - 20
         self.speed = 2
         self.moved = False
         self.shots = 0
@@ -140,19 +152,18 @@ class Tank(pygame.sprite.Sprite):
         precent = max(0, min(hp / max_hp, 1))
         bar_width = 200
         bar_height = 50
+        distance_from_border = 50
         bar_precent = int(precent * bar_width)
         if self.client_id == 1:
-            bar_x = 0
+            bar_x = distance_from_border
         else:
-            bar_x = screen_width - 220
-        bar_y = 75
+            bar_x = screen_width - bar_width - distance_from_border
+        bar_y = 40
         pygame.draw.rect(surface, (100, 0, 0), (bar_x, bar_y, bar_width, bar_height))
         color = (0, 255, 0) if self.hp > 30 else (255, 165, 0)  # משנה צבע בחיים נמוכים
         pygame.draw.rect(surface, color, (bar_x, bar_y, bar_precent, bar_height))
 
-    def draw_tank(self):
-        self.image.fill((0, 0, 0, 0))
-        pygame.draw.rect(self.image, self.tank_color, (0, 0, tanksize, tanksize))
+
 
     def update(self):
         if self.client_id == client_id:
@@ -169,6 +180,7 @@ class Tank(pygame.sprite.Sprite):
                 self.rect.x -= self.speed
             if keys[pygame.K_RIGHT]:
                 self.rect.x += self.speed
+
             if self.client_id == 1:
                 if self.rect.left < 0:
                     self.rect.left = 0
@@ -197,7 +209,12 @@ def update_data(data):
             enemy_turret.angle = int(parts[3])
             temp_id = int(parts[4])
             enemy_turret.image = pygame.transform.rotate(enemy_turret.original_image, enemy_turret.angle)
-            enemy_turret.rect = enemy_turret.image.get_rect(center=enemy.rect.center)
+            if enemy_id == 1:
+                pivot_x = enemy.rect.right - 22
+            else:
+                pivot_x = enemy.rect.x + 22
+            pivot_y = enemy.rect.y + 15
+            enemy_turret.rect = enemy_turret.image.get_rect(center=(pivot_x, pivot_y))
     if parts[0] == "shoted":
 
         client_shots = int(parts[4])
@@ -221,6 +238,20 @@ def update_data(data):
             del bullets[client_shots]
 
 
+def show_game_over(screen, result_text, color):
+    font_big = pygame.font.SysFont("Arial", 100, bold=True)
+    font_small = pygame.font.SysFont("Arial", 50)
+
+    for i in range(5, 0, -1):
+        screen.fill("black")
+        text_surf = font_big.render(result_text, True, color)
+        screen.blit(text_surf, (screen_width // 2 - text_surf.get_width() // 2, screen_height // 3))
+        countdown_text = f"Returning to menu in {i}..."
+        count_surf = font_small.render(countdown_text, True, "white")
+        screen.blit(count_surf, (screen_width // 2 - count_surf.get_width() // 2, screen_height // 2))
+
+        pygame.display.flip()
+        pygame.time.delay(1000)
 def listen_to_server():
     global running, room_id, client_id, player, turret, enemy, enemy_id, enemy_turret, all_sprites, current_state ,player_shots, enemy_shots, bullets, bullet_temp
     while running:
@@ -232,6 +263,15 @@ def listen_to_server():
                 print("tcp revc",msg)
                 if msg == "EXIT":
                     current_state = STATE_MENU
+                if tcparts[0] == "LOSE":
+                    loseid = int(tcparts[1])
+                    if loseid == client_id:
+                        show_game_over(screen, "YOU LOST!", (255, 0, 0))  # אדום
+                    if loseid == enemy_id:
+                        show_game_over(screen, "YOU WIN!", (0, 255, 0))  # ירוק
+                    current_state = STATE_MENU
+                    room_id = None
+
                 if tcparts[0] == "JOIN_SUCCESS":
 
                     room_id = tcparts[1]
@@ -252,13 +292,12 @@ def listen_to_server():
                         bullets = {}
                         enemy = Tank(enemy_id)
                         enemy.tank_color = "red"
-                        enemy.draw_tank()
-
                         enemy_turret = Turret(enemy, enemy_id)
                         enemy_turret.turret_color = "black"
-                        all_sprites.add(enemy_turret)
+
                         all_sprites.add(enemy)
                         all_sprites.add(bullet_temp)
+                        all_sprites.add(enemy_turret)
                         player_shots = 0
                         enemy_shots = 0
                         print(f"room update to : {room_id} client id to :{client_id}")
@@ -285,7 +324,7 @@ def listen_to_server():
             pass
         except Exception as e:
             print(f"Error receiving: {e}")
-
+all_sprites = pygame.sprite.Group()
 player_shots = 0
 enemy_shots = 0
 running = True
@@ -347,6 +386,8 @@ while running:
 
 
     elif current_state == STATE_GAME:
+        if player is None or turret is None:
+            continue
         all_sprites.update()
         if player.moved or turret.angle_changed:
             msg = f"move|{client_id}|{room_id}|{player.rect.x}|{player.rect.y}|{turret.angle}"

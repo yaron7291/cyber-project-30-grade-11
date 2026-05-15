@@ -63,8 +63,8 @@ def shot_logic(client_id, client_shot, room_id):
         return
     xi = float(playerdata['x'])
     yi = float(playerdata['y'])
-    angle = float(playerdata['angle'])
-    rad_angle = math.radians(90 - angle)
+    angle = abs(float(playerdata['angle']))
+    rad_angle = math.radians(angle)
     g = 4
     clock = float(1/60)
     force = 80
@@ -72,12 +72,14 @@ def shot_logic(client_id, client_shot, room_id):
     t_total = abs((-2 * force * math.sin(rad_angle) ) / g)
     y_temp = -100
     x_temp = -100
+    if client_id_str == "1":
+        direction = -1
+    else: direction = 1
     while t_temp <= t_total:
         ## physics with udi the best teacher
-        x_temp = xi - force * math.cos(rad_angle) * t_temp
+        x_temp = xi - force * math.cos(rad_angle) * t_temp * direction
         y_temp = yi - force * abs(math.sin(rad_angle)) * t_temp + g * math.pow(t_temp, 2) / 2
         to_send = f"shoted|{x_temp}|{y_temp}|{client_id}|{client_shot}|1"
-        print("other id :", other_id)
         playerdataother = room.clients_info[other_id]
         otherx = float(playerdataother['x'])
         othery = float(playerdataother['y'])
@@ -86,7 +88,7 @@ def shot_logic(client_id, client_shot, room_id):
         t_temp = t_temp + clock
         time.sleep(clock)
         ## בדיקה אם הכדור בתוך הטווח שבו הטנק של היריב
-        if otherx - 25 < x_temp < otherx + 25 and othery - 25 < y_temp < othery + 25:
+        if otherx - 50 < x_temp < otherx + 50 and othery - 15< y_temp < othery + 15:
             print("Hited")
             print(f"before hp : {float(room.clients_info[other_id]['hp'])}")
             room.clients_info[other_id]['hp'] -= 10
