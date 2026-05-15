@@ -6,7 +6,7 @@ from traceback import format_exc
 
 from tcp_by_size import send_with_size, recv_by_size
 import socket, threading ,time , math
-
+rooms_lock = threading.Lock()
 all_to_die = False
 fps = 60
 client_shot = 1
@@ -19,6 +19,7 @@ class GameRoom:
         self.udp_players = {}
         self.clients_info = {}
         self.game_started = False
+        self.bullet_countre = 0
 
     def add_player(self, player):
         if len(self.players) < 2:
@@ -101,13 +102,17 @@ def shot_logic(client_id, client_shot, room_id):
 
             print(f"after hit msg: {gotshotmsg}")
             t_temp = t_total + 1
-            if room.clients_info[other_id]['hp'] == 0:
+            if room.clients_info[other_id]['hp'] <= 0:
                 msglose = f"LOSE|{other_id}"
                 for Player_tcp_socket in room.players:
                     try:
                         send_with_size(Player_tcp_socket, msglose.encode())
                     except:
                         pass
+                time.sleep(1)
+                if room_id in all_rooms:
+                    del all_rooms[room_id]
+                    print(f"rome {room_id} closed and deleted!")
 
         for target_id, target_addr in room.udp_players.items():
             udp_sock.sendto(to_send.encode(), target_addr)
@@ -118,10 +123,7 @@ def shot_logic(client_id, client_shot, room_id):
         udp_sock.sendto(stopmsg.encode(), target_addr)
 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp_sock.bind(('0.0.0.0', 1234))
-all_rooms = {
-    "1234": GameRoom("1234"),
-    "5678": GameRoom("5678")
-}
+all_rooms = {}
 
 
 def handle_udp_communication():
@@ -190,17 +192,40 @@ def handle_client(sock, tid, addr):
                 print(f"Created private room: {new_id}")
 
             elif parts[0] == "MATCHMAKE":
-                found = False
-                for r_id, r_obj in all_rooms.items():
-                    if len(r_obj.players) == 1:
-                        target_room_obj = r_obj
-                        found = True
-                        break
+                with rooms_lock:
+                    to_delete = [rid for rid, r in list(all_rooms.items()) if len(r.players) == 0]
+                    for rid in to_delete:
+                        del all_rooms[rid]
+                    found = False
+                    target_room_obj = None
+                    for r_id, r_obj in all_rooms.items():
+                        if len(r_obj.players) == 1:
+                            target_room_obj = r_obj
+                            found = True
+                            print(f"joined existing room: {r_id}")
+                            break
 
-                if not found:
-                    new_id = generate_room_id()
-                    all_rooms[new_id] = GameRoom(new_id)
-                    target_room_obj = all_rooms[new_id]
+                    if not found:
+                        new_id = generate_room_id()
+                        all_rooms[new_id] = GameRoom(new_id)
+                        target_room_obj = all_rooms[new_id]
+                if target_room_obj:
+                    if target_room_obj.add_player(sock):
+                        room_id = target_room_obj.roomd_id
+
+                        send_with_size(sock, f"JOIN_SUCCESS|{room_id}".encode())
+
+                        current_room = all_rooms[room_id]
+                        my_id_in_room = str(len(current_room.players))
+                        current_room.clients_info[my_id_in_room] = {'x': 0, 'y': 0, 'angle': 0, 'hp': 100.0}
+
+                        send_with_size(sock, my_id_in_room.encode())
+
+                        if len(current_room.players) == 2:
+                            for s in current_room.players:
+                                send_with_size(s, "START".encode())
+                    else:
+                        send_with_size(sock, "ERROR|Room full".encode())
 
             elif parts[0] == "JOIN_PRIVATE":
                 code = parts[1]
@@ -210,23 +235,7 @@ def handle_client(sock, tid, addr):
                     send_with_size(sock, "ERROR|Room not found".encode())
                     continue
 
-            if target_room_obj:
-                if target_room_obj.add_player(sock):
-                    room_id = target_room_obj.roomd_id
 
-                    send_with_size(sock, f"JOIN_SUCCESS|{room_id}".encode())
-
-                    current_room = all_rooms[room_id]
-                    my_id_in_room = str(len(current_room.players))
-                    current_room.clients_info[my_id_in_room] = {'x': 0, 'y': 0, 'angle': 0, 'hp': 100.0}
-
-                    send_with_size(sock, my_id_in_room.encode())
-
-                    if len(current_room.players) == 2:
-                        for s in current_room.players:
-                            send_with_size(s, "START".encode())
-                else:
-                    send_with_size(sock, "ERROR|Room full".encode())
 
         except Exception as e:
             print(f"Error in menu phase: {e}")
@@ -248,22 +257,20 @@ def handle_client(sock, tid, addr):
             request_code = parts[0]
             print(request_code)
             if request_code == 'EXIT':
-
-                finish = True
-                tmpid = parts[1]
                 exitmsg = f"EXIT"
-                room_id = parts[2]
-                if room_id != "None" and room_id in all_rooms:
-                    room = all_rooms[room_id]
-                    if sock in room.players:
-                        room.players.remove(sock)
-                for sockt in room.players:
-                    try:
-                        send_with_size(sockt, exitmsg.encode())
-                        print(exitmsg)
-                    except Exception as e:
-                        print(e)
-
+                room_id_str= parts[2]
+                if room_id_str and room_id_str in all_rooms:
+                    room = all_rooms[room_id_str]
+                    for sockt in list(room.players):
+                        try:
+                            send_with_size(sockt, exitmsg.encode())
+                            print(exitmsg)
+                        except Exception as e:
+                            print(e)
+                    del all_rooms[room_id_str]
+                    print(f"rome {room_id_str} closed and deleted!")
+                room_id = None
+                break
 
             if request_code == 'shot':
                 client_id = parts[1]

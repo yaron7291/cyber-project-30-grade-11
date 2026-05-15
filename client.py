@@ -10,12 +10,14 @@ server_address_tcp = ('127.0.0.1', 1233)
 server_address_udp = ('127.0.0.1', 1234)
 sock.connect(server_address_tcp)
 
+waiting_for_room = False
 client_id = None
 enemy_id = None
 room_id = None
 player = None
 enemy = None
 turret = None
+bullets ={}
 enemy_turret = None
 
 pygame.init()
@@ -197,6 +199,7 @@ class Tank(pygame.sprite.Sprite):
 
 
 def update_data(data):
+    if player is None or enemy is None: return
     parts = data.split("|")
     print("update_data", data)
     if parts[0] == "moved":
@@ -230,7 +233,7 @@ def update_data(data):
         bullets[client_shots].rect.x = x
         bullets[client_shots].rect.y = y
         bullets[client_shots].clientid = clientid
-        print(f"y:{bullet_temp.rect.y}, x:{bullet_temp.rect.x}, id:{bullet_temp.client_id}")
+        print(f"y:{bullets[client_shots].rect.y}, x:{bullets[client_shots].rect.x}, id:{bullets[client_shots].client_id}")
         if parts[5] == "0":
             if clientid == client_id:
                 player.shoting_avb = True
@@ -241,19 +244,30 @@ def update_data(data):
 def show_game_over(screen, result_text, color):
     font_big = pygame.font.SysFont("Arial", 100, bold=True)
     font_small = pygame.font.SysFont("Arial", 50)
+    showing = True
+    start_ticks = pygame.time.get_ticks()
+    while showing:
+        seconds_passed = (pygame.time.get_ticks() - start_ticks) // 1000
+        countdown = 5 - seconds_passed
+        if countdown <= 0:
+            showing = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                showing = False
+                sys.exit()
 
-    for i in range(5, 0, -1):
         screen.fill("black")
         text_surf = font_big.render(result_text, True, color)
         screen.blit(text_surf, (screen_width // 2 - text_surf.get_width() // 2, screen_height // 3))
-        countdown_text = f"Returning to menu in {i}..."
+        countdown_text = f"Returning to menu in {countdown} seconds..."
         count_surf = font_small.render(countdown_text, True, "white")
         screen.blit(count_surf, (screen_width // 2 - count_surf.get_width() // 2, screen_height // 2))
 
         pygame.display.flip()
-        pygame.time.delay(1000)
+        clock.tick(60)
+
 def listen_to_server():
-    global running, room_id, client_id, player, turret, enemy, enemy_id, enemy_turret, all_sprites, current_state ,player_shots, enemy_shots, bullets, bullet_temp
+    global running, room_id, client_id, player, turret, enemy, enemy_id, enemy_turret, all_sprites, current_state ,player_shots, enemy_shots, bullets, bullet_temp, waiting_for_room
     while running:
         try:
             tcpdata = recv_by_size(sock)
@@ -263,24 +277,42 @@ def listen_to_server():
                 print("tcp revc",msg)
                 if msg == "EXIT":
                     current_state = STATE_MENU
+                    waiting_for_room = False
+                    room_id = None
+                    player = None
+                    enemy = None
+                    turret = None
+                    enemy_turret = None
+                    bullets.clear()
+                    print("Returned to menu after EXIT")
+                    continue
                 if tcparts[0] == "LOSE":
                     loseid = int(tcparts[1])
+                    global game_result_text, game_result_color
                     if loseid == client_id:
-                        show_game_over(screen, "YOU LOST!", (255, 0, 0))  # אדום
+                        game_result_text = "YOU LOST!"
+                        game_result_color = (255, 0, 0) ## אדום
                     if loseid == enemy_id:
-                        show_game_over(screen, "YOU WIN!", (0, 255, 0))  # ירוק
-                    current_state = STATE_MENU
+                        game_result_text = "YOU WIN!"
+                        game_result_color = (0, 255, 0) ## ירוק
+                    current_state = "GAME_OVER"
                     room_id = None
 
                 if tcparts[0] == "JOIN_SUCCESS":
-
                     room_id = tcparts[1]
-                    id_data= recv_by_size(sock)
+                    id_data = recv_by_size(sock)
                     if id_data:
                         client_id = int(id_data.decode())
+
+                        # Reset everything
+                        all_sprites = pygame.sprite.Group()
+                        bullets.clear()
+                        player_shots = 0
+                        enemy_shots = 0
+                        waiting_for_room = False  # ← חשוב מאוד!
+
                         player = Tank(client_id)
                         turret = Turret(player, client_id)
-                        all_sprites = pygame.sprite.Group()
                         all_sprites.add(player)
                         all_sprites.add(turret)
 
@@ -288,18 +320,15 @@ def listen_to_server():
                             enemy_id = 2
                         else:
                             enemy_id = 1
-                        bullet_temp = Bullet(client_id)
-                        bullets = {}
+
                         enemy = Tank(enemy_id)
-                        enemy.tank_color = "red"
                         enemy_turret = Turret(enemy, enemy_id)
-                        enemy_turret.turret_color = "black"
+                        bullet_temp = Bullet(client_id)
 
                         all_sprites.add(enemy)
                         all_sprites.add(bullet_temp)
                         all_sprites.add(enemy_turret)
-                        player_shots = 0
-                        enemy_shots = 0
+
                         print(f"room update to : {room_id} client id to :{client_id}")
                         msg_udp = f"hello|{client_id}|{room_id}"
                         sockudp.sendto(msg_udp.encode(), server_address_udp)
@@ -332,6 +361,9 @@ threading.Thread(target=listen_to_server, daemon=True).start()
 STATE_MENU = "MENU"
 STATE_LOBBY = "LOBBY"
 STATE_GAME = "GAME"
+STATE_GAME_OVER = "GAME_OVER"
+game_result_text = ""
+game_result_color = (255, 0, 0)
 current_state = STATE_MENU
 room_code_input = ""
 typing_mode = False
@@ -357,6 +389,10 @@ while running:
     if current_state == STATE_MENU:
         screen.fill("black")
         if draw_button(screen, "Random Match", 550, 200, 300, 50, "blue", "cyan"):
+            room_id = None
+            waiting_for_room = True
+            player = None
+            enemy = None
             send_with_size(sock, "MATCHMAKE")
             current_state = STATE_LOBBY
 
@@ -379,17 +415,20 @@ while running:
             font = pygame.font.SysFont("Arial", 50)
             text = font.render("Waiting for second player...", True, "white")
             screen.blit(text, (screen_width // 2 - 250, screen_height // 2))
-            if room_id:
+
+            if room_id and not waiting_for_room:
                 font_small = pygame.font.SysFont("Arial", 40)
                 code_text = font_small.render(f"Enter code: {room_id}", True, (255, 255, 255))
                 screen.blit(code_text, (screen_width // 2 - code_text.get_width()// 2, screen_height // 2+ 150))
-
+            else:
+                small = pygame.font.SysFont("Arial", 30)
+                screen.blit(small.render("Connecting...", True, "yellow"),(screen_width // 2 - 80, screen_height // 2 + 30))
 
     elif current_state == STATE_GAME:
         if player is None or turret is None:
             continue
         all_sprites.update()
-        if player.moved or turret.angle_changed:
+        if player.moved or turret.angle_changed and room_id:
             msg = f"move|{client_id}|{room_id}|{player.rect.x}|{player.rect.y}|{turret.angle}"
             sockudp.sendto(msg.encode(), server_address_udp)
             player.moved = False
@@ -398,10 +437,11 @@ while running:
 
         if player.shots > player_shots:
             msg_shot = f"shot|{client_id}|{room_id}|{player.shots}"
-            send_with_size(sock, msg_shot)
+            send_with_size(sock, msg_shot.encode())
             player_shots = player.shots
         player.moved = False
         turret.angle_changed = False
+
         sockudp.setblocking(False)
         try:
             while True:
@@ -416,8 +456,18 @@ while running:
             print(f"Error receiving: {e}")
         screen.fill("blue")
         all_sprites.draw(screen)
-        enemy.draw_hprect(screen)
-        player.draw_hprect(screen)
+        if enemy: enemy.draw_hprect(screen)
+        if player :player.draw_hprect(screen)
+        pygame.display.flip()
+        clock.tick(fps)
+        continue
+    elif current_state == STATE_GAME_OVER:
+            show_game_over(screen,game_result_text,game_result_color)
+            room_id = None
+            client_id = None
+            player = None
+            enemy = None
+            current_state = STATE_MENU
     pygame.display.flip()
     clock.tick(fps)
 pygame.quit()
