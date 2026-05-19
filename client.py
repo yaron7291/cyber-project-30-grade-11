@@ -428,7 +428,7 @@ while running:
         if player is None or turret is None:
             continue
         all_sprites.update()
-        if player.moved or turret.angle_changed and room_id:
+        if (player.moved or turret.angle_changed) and room_id:
             msg = f"move|{client_id}|{room_id}|{player.rect.x}|{player.rect.y}|{turret.angle}"
             sockudp.sendto(msg.encode(), server_address_udp)
             player.moved = False

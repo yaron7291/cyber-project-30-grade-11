@@ -292,7 +292,7 @@ def main():
     srv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     i = 1
     udp_tread = threading.Thread(target=handle_udp_communication)
-    udp_tread.deamon = True
+    udp_tread.daemon = True
     udp_tread.start()
     while True:
         cli_sock, addr = srv_sock.accept()
