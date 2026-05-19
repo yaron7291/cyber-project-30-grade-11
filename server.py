@@ -35,7 +35,6 @@ class PlayerData:
         self.hp = 100
         self.is_turn = False
         self.color = color
-        self.hp = 100
 
 
 def shot(client_id, room_id):
@@ -191,6 +190,7 @@ def handle_client(sock, tid, addr):
                 target_room_obj = all_rooms[new_id]
                 print(f"Created private room: {new_id}")
 
+
             elif parts[0] == "MATCHMAKE":
                 with rooms_lock:
                     to_delete = [rid for rid, r in list(all_rooms.items()) if len(r.players) == 0]
@@ -209,23 +209,6 @@ def handle_client(sock, tid, addr):
                         new_id = generate_room_id()
                         all_rooms[new_id] = GameRoom(new_id)
                         target_room_obj = all_rooms[new_id]
-                if target_room_obj:
-                    if target_room_obj.add_player(sock):
-                        room_id = target_room_obj.roomd_id
-
-                        send_with_size(sock, f"JOIN_SUCCESS|{room_id}".encode())
-
-                        current_room = all_rooms[room_id]
-                        my_id_in_room = str(len(current_room.players))
-                        current_room.clients_info[my_id_in_room] = {'x': 0, 'y': 0, 'angle': 0, 'hp': 100.0}
-
-                        send_with_size(sock, my_id_in_room.encode())
-
-                        if len(current_room.players) == 2:
-                            for s in current_room.players:
-                                send_with_size(s, "START".encode())
-                    else:
-                        send_with_size(sock, "ERROR|Room full".encode())
 
             elif parts[0] == "JOIN_PRIVATE":
                 code = parts[1]
@@ -234,6 +217,25 @@ def handle_client(sock, tid, addr):
                 else:
                     send_with_size(sock, "ERROR|Room not found".encode())
                     continue
+
+            if target_room_obj:
+                if target_room_obj.add_player(sock):
+                    room_id = target_room_obj.roomd_id
+
+                    send_with_size(sock, f"JOIN_SUCCESS|{room_id}".encode())
+
+                    current_room = all_rooms[room_id]
+                    my_id_in_room = str(len(current_room.players))
+                    current_room.clients_info[my_id_in_room] = {'x': 0, 'y': 0, 'angle': 0, 'hp': 100.0}
+
+                    send_with_size(sock, my_id_in_room.encode())
+
+                    if len(current_room.players) == 2:
+                        for s in current_room.players:
+                            send_with_size(s, "START".encode())
+                else:
+                    send_with_size(sock, "ERROR|Room full".encode())
+
 
 
 
